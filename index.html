@@ -623,6 +623,16 @@ function App(){
   const [gameKey,setGameKey]   = useState(0);
   const [finalStats,setFinals] = useState({stolen:0,score:0});
 
+// --- ADD THE MUSIC CODE HERE ---
+  useEffect(() => {
+    const bgm = new Audio('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'); // Replace with your URL
+    bgm.volume = 0.5;
+    bgm.loop = true;
+    bgm.play().catch(e => console.log("Audio play blocked until interaction"));
+    return () => bgm.pause();
+  }, []);
+  // -------------------------------
+  
   const handleStart   = ()=>setPhase('countdown');
   const handleCdDone  = useCallback(()=>setPhase('game'),[]);
   const handleGameOver= useCallback((stolen,score)=>{
