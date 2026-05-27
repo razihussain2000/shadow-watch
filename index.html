@@ -85,7 +85,7 @@ const isTouch=()=>'ontouchstart' in window||navigator.maxTouchPoints>0;
    setTimeout callbacks always read fresh values.
    A single `bump()` triggers re-renders when needed.
    ════════════════════════════════════════════════════════ */
-function useGameLogic(){
+function useGameLogic(onWin){ // <-- Accept onWin here
   const vals      = useRef(pick9());
   const looted    = useRef(Array(9).fill(false));
   const burglar   = useRef(Math.floor(Math.random()*9));
@@ -116,7 +116,7 @@ function useGameLogic(){
     target.current = t;
     bump();
 
-    clearTimeout(moveTimer.current);
+  clearTimeout(moveTimer.current);
     moveTimer.current = setTimeout(()=>{
       if(!active.current) return;
       /* burglar arrives */
@@ -129,7 +129,6 @@ function useGameLogic(){
       burglar.current = t;
       target.current  = null;
       bump();
-      /* short pause then next move */
       setTimeout(scheduleMove, 350);
     }, MOVE_MS);
   },[]);
@@ -159,7 +158,7 @@ function useGameLogic(){
   const startLock = useCallback((idx)=>{
     if(!active.current) return;
     if(looted.current[idx]) return;
-    if(target.current === null) return;   // burglar not moving yet
+    if(target.current === null) return;
 
     lockedOn.current = idx;
     const start = Date.now();
@@ -169,16 +168,28 @@ function useGameLogic(){
     lockTimer.current = setTimeout(()=>{
       if(!active.current) return;
       if(lockedOn.current === target.current){
-        /* ✓ CATCH */
+        /* ✓ CATCH & INSTANT WIN */
         clearTimeout(moveTimer.current);
-        setScore(s=>s+1);
+        
+        // Play the celebratory win sound
+        try {
+          const sfx = new Audio('https://assets.mixkit.co/active_storage/sfx/2019/2019-84.wav');
+          sfx.volume = 0.6;
+          sfx.play();
+        } catch(e) { console.log("SFX playback blocked"); }
+
+        setScore(1);
         setNotif({type:'catch',idx,key:Date.now()});
         lockedOn.current = null;
         setLockState({idx:null,start:null});
-        doRespawn();
+        
+        // Short delay to let the visual "CAUGHT!" notification pop before the victory screen cuts in
+        setTimeout(() => {
+          onWin(stolen.current ?? vals.current.reduce((acc, current, i) => looted.current[i] ? acc + current : acc, 0));
+        }, 800);
       }
     }, LOCK_MS);
-  },[doRespawn]);
+  },[onWin]);
 
   /* ── lock-on: cancel ── */
   const cancelLock = useCallback(()=>{
@@ -430,8 +441,8 @@ function HUD({stolen,score,lootCount,moving}){
    GameSession — isolated component so its useGameLogic
    instance is truly destroyed & recreated on each restart.
    ════════════════════════════════════════════════════════ */
-function GameSession({onGameOver}){
-  const g = useGameLogic();
+function GameSession({onGameOver, onWin}){ // <-- Accept onWin here
+  const g = useGameLogic(onWin); // <-- Pass it down into the hook
   const touch = isTouch();
 
   useEffect(()=>{
@@ -452,7 +463,6 @@ function GameSession({onGameOver}){
 
       <div style={{width:'100%',maxWidth:'min(480px,96vw)'}}>
         <HUD stolen={g.stolen} score={g.score} lootCount={g.lootCount} moving={g.target!==null}/>
-        {/* grid frame */}
         <div style={{background:'rgba(3,7,14,.99)',border:'2px solid #0c1c30',borderRadius:6,
           padding:'clamp(5px,1.5vw,8px)',
           boxShadow:'0 0 60px rgba(0,0,0,.9),inset 0 0 70px rgba(0,0,0,.6)'}}>
@@ -613,34 +623,102 @@ function GameOverScreen({stolen,score,onRestart}){
   );
 }
 
+function WinScreen({stolen,onRestart}){
+  const [hov,setHov]=useState(false);
+  return(
+    <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+      height:'100dvh',width:'100%',background:'#030708',position:'relative'}}>
+      <div className="scanlines"/>
+      <div style={{position:'absolute',inset:0,
+        background:'radial-gradient(circle at 50% 50%, rgba(16,185,129,0.08) 0%, transparent 70%)',
+        pointerEvents:'none'}}/>
+      <div style={{textAlign:'center',zIndex:10,padding:'clamp(16px,5vw,28px)',width:'100%',maxWidth:420}}>
+        <div style={{fontSize:'var(--fs-tiny)',letterSpacing:6,color:'#10b981',
+          fontFamily:'Share Tech Mono',marginBottom:'clamp(10px,3vw,16px)'}}>
+          THREAT NEUTRALIZED
+        </div>
+        <h2 style={{fontFamily:'Orbitron,monospace',fontSize:'clamp(24px,8vw,44px)',fontWeight:900,
+          color:'#10b981',letterSpacing:4,textShadow:'0 0 40px rgba(16,185,129,0.6)',
+          marginBottom:'clamp(20px,5vw,32px)'}}>MISSION SUCCESS</h2>
+        <div style={{display:'flex',gap:'clamp(10px,3vw,20px)',justifyContent:'center',
+          marginBottom:'clamp(24px,6vw,38px)'}}>
+          <div style={{background:'rgba(4,18,12,0.85)',border:'1px solid #065f46',
+            borderRadius:6,padding:'clamp(14px,4vw,22px) clamp(16px,4vw,28px)',textAlign:'center',flex:1}}>
+            <div style={{color:'#475569',fontSize:'var(--fs-tiny)',letterSpacing:2,
+              marginBottom:8,fontFamily:'Share Tech Mono'}}>FINAL DAMAGE</div>
+            <div style={{color:'#f87171',fontSize:'clamp(18px,5vw,24px)',fontFamily:'Orbitron,monospace',
+              fontWeight:700}}>{fmt(stolen)}</div>
+          </div>
+          <div style={{background:'rgba(4,18,12,0.85)',border:'1px solid #065f46',
+            borderRadius:6,padding:'clamp(14px,4vw,22px) clamp(16px,4vw,28px)',textAlign:'center',flex:1}}>
+            <div style={{color:'#475569',fontSize:'var(--fs-tiny)',letterSpacing:2,
+              marginBottom:8,fontFamily:'Share Tech Mono'}}>OPERATIVE STATUS</div>
+            <div style={{color:'#34d399',fontSize:'clamp(14px,4vw,18px)',fontFamily:'Orbitron,monospace',
+              fontWeight:700,letterSpacing:1,marginTop:4}}>PROMOTED</div>
+          </div>
+        </div>
+        <button onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+          onClick={onRestart}
+          style={{fontFamily:'Orbitron,monospace',fontSize:'var(--fs-sm)',fontWeight:700,
+            letterSpacing:4,color:hov?'#060a0f':'#10b981',
+            background:hov?'#10b981':'transparent',border:'2px solid #10b981',
+            borderRadius:3,padding:'clamp(11px,3vw,14px) clamp(28px,8vw,40px)',
+            cursor:'pointer',transition:'all .18s',width:'100%',maxWidth:280,
+            boxShadow:hov?'0 0 28px rgba(16,185,129,.65)':'0 0 10px rgba(16,185,129,.14)'}}>
+          NEXT ASSIGNMENT
+        </button>
+      </div>
+    </div>
+  );
+}
+  
 /* ════════════════════════════════════════════════════════
    Root — manages phase & passes final stats to game-over.
    GameSession unmounts completely on restart (via key),
    so useGameLogic refs are fully reset.
    ════════════════════════════════════════════════════════ */
+  
 function App(){
   const [phase,setPhase]       = useState('start');
   const [gameKey,setGameKey]   = useState(0);
   const [finalStats,setFinals] = useState({stolen:0,score:0});
+  const audioRef               = useRef(null);
 
-// --- ADD THE MUSIC CODE HERE ---
+  // Mysterious, subtle ambient synth background layer
   useEffect(() => {
-    const bgm = new Audio('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'); // Replace with your URL
-    bgm.volume = 0.5;
-    bgm.loop = true;
-    bgm.play().catch(e => console.log("Audio play blocked until interaction"));
-    return () => bgm.pause();
+    audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/123/123-200.wav'); 
+    // Alternate high-quality loopable track string option:
+    audioRef.current = new Audio('https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3');
+    audioRef.current.volume = 0.25; // 50% of typical baseline mix power to keep it clean and subtle
+    audioRef.current.loop = true;
+
+    return () => {
+      if(audioRef.current) audioRef.current.pause();
+    };
   }, []);
-  // -------------------------------
-  
-  const handleStart   = ()=>setPhase('countdown');
+
+  // Web Browsers block playback until a gesture occurs. We trigger it on click!
+  const handleStart = () => {
+    if(audioRef.current) {
+      audioRef.current.play().catch(e => console.log("Audio waiting for core window interaction"));
+    }
+    setPhase('countdown');
+  };
+
   const handleCdDone  = useCallback(()=>setPhase('game'),[]);
+  
   const handleGameOver= useCallback((stolen,score)=>{
     setFinals({stolen,score});
     setPhase('over');
   },[]);
+
+  const handleWin = useCallback((stolen)=>{
+    setFinals({stolen, score: 1});
+    setPhase('win'); // Triggers victory screen state layout phase
+  },[]);
+
   const handleRestart = ()=>{
-    setGameKey(k=>k+1);   // unmount old GameSession → fresh refs
+    setGameKey(k=>k+1);   // Unmounts old GameSession view to completely reset state references
     setFinals({stolen:0,score:0});
     setPhase('countdown');
   };
@@ -648,8 +726,10 @@ function App(){
   if(phase==='start')    return <StartScreen onStart={handleStart}/>;
   if(phase==='countdown')return <CountdownScreen key={`cd-${gameKey}`} onDone={handleCdDone}/>;
   if(phase==='over')     return <GameOverScreen stolen={finalStats.stolen} score={finalStats.score} onRestart={handleRestart}/>;
+  if(phase==='win')      return <WinScreen stolen={finalStats.stolen} onRestart={handleRestart}/>;
+  
   /* phase==='game' */
-  return <GameSession key={`gs-${gameKey}`} onGameOver={handleGameOver}/>;
+  return <GameSession key={`gs-${gameKey}`} onGameOver={handleGameOver} onWin={handleWin}/>;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
