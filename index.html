@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>SHADOW WATCH</title>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{width:100%;height:100%;background:#060a0f;overflow:hidden;touch-action:manipulation}
+#root{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
+
+@keyframes scanline{0%{transform:translateY(-50%)}100%{transform:translateY(0%)}}
+@keyframes glitch{
+  0%,88%,100%{text-shadow:2px 0 #f59e0b,-2px 0 #3b82f6}
+  90%{text-shadow:-3px 0 #f59e0b,3px 0 #3b82f6,0 0 22px #f59e0b}
+  93%{text-shadow:3px 0 #ef4444,-3px 0 #3b82f6}
+  95%{text-shadow:none}
+  97%{text-shadow:-2px 0 #f59e0b,2px 0 #3b82f6}
+}
+@keyframes bigpulse{0%{transform:scale(1);opacity:1}50%{transform:scale(1.1);opacity:.85}100%{transform:scale(1);opacity:1}}
+@keyframes lossnotif{
+  0%{opacity:0;transform:translateX(-50%) translateY(4px) scale(.85)}
+  12%{opacity:1;transform:translateX(-50%) translateY(-6px) scale(1)}
+  75%{opacity:1;transform:translateX(-50%) translateY(-6px) scale(1)}
+  100%{opacity:0;transform:translateX(-50%) translateY(-20px) scale(.9)}
+}
+@keyframes catchnotif{
+  0%{opacity:0;transform:translateX(-50%) scale(.8)}
+  15%{opacity:1;transform:translateX(-50%) scale(1.05)}
+  25%{transform:translateX(-50%) scale(1)}
+  80%{opacity:1}
+  100%{opacity:0;transform:translateX(-50%) translateY(-14px)}
+}
+
+.glitch-title{animation:glitch 5s infinite}
+.countdown-pop{animation:bigpulse .75s ease}
+.loss-notif{animation:lossnotif 2.4s ease forwards}
+.catch-notif{animation:catchnotif 2s ease forwards}
+.scanlines{
+  position:fixed;top:0;left:0;width:100%;height:200%;pointer-events:none;z-index:999;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,200,0,0.011) 2px,rgba(0,200,0,0.011) 4px);
+  animation:scanline 7s linear infinite;
+}
+
+/* fluid type scale */
+:root{
+  --fs-tiny:clamp(7px,1.8vw,9px);
+  --fs-sm:clamp(9px,2.2vw,11px);
+  --fs-md:clamp(11px,2.8vw,14px);
+  --fs-lg:clamp(16px,4vw,22px);
+  --fs-xl:clamp(28px,8vw,52px);
+  --fs-count:clamp(70px,22vw,150px);
+  --gap:clamp(5px,1.5vw,8px);
+  --pad:clamp(8px,2.5vw,14px);
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef,useCallback,useReducer}=React;
+
+const MOVE_MS  = 2000;
+const LOCK_MS  = 1000;
+const MAX_LOOT = 3;
+
+const POOL=[1250,2800,4500,5700,6200,7800,8900,9200,10500,11400,12000,13500,14200,15000,3600,2100,7200,4100,6800];
+const pick9=()=>[...POOL].sort(()=>Math.random()-.5).slice(0,9);
+const fmt=v=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(v);
+const bestIdx=(vals,looted,skip)=>{
+  let bi=-1,bv=-Infinity;
+  vals.forEach((v,i)=>{if(!looted[i]&&i!==skip&&v>bv){bv=v;bi=i;}});
+  return bi;
+};
+
+/* ── Detect touch device ── */
+const isTouch=()=>'ontouchstart' in window||navigator.maxTouchPoints>0;
+
+/* ════════════════════════════════════════════════════════
+   useGameLogic  — all mutable game state in refs so
+   setTimeout callbacks always read fresh values.
+   A single `bump()` triggers re-renders when needed.
+   ════════════════════════════════════════════════════════ */
+function useGameLogic(){
+  const vals      = useRef(pick9());
+  const looted    = useRef(Array(9).fill(false));
+  const burglar   = useRef(Math.floor(Math.random()*9));
+  const target    = useRef(null);
+  const lockedOn  = useRef(null);
+  const moveTimer = useRef(null);
+  const lockTimer = useRef(null);
+  const active    = useRef(true);
+
+  const [,bump]           = useReducer(n=>n+1,0);
+  const [stolen,setStolen]= useState(0);
+  const [score,setScore]  = useState(0);
+  const [lockState,setLockState]  = useState({idx:null,start:null}); // for progress bar
+  const [notif,setNotif]  = useState(null);  // {type,idx,amount?,key}
+
+  /* count looted for game-over detection */
+  const lootCount = looted.current.filter(Boolean).length;
+  const isDead    = lootCount >= MAX_LOOT;
+
+  /* ── schedule burglar move ── */
+  const scheduleMove = useCallback(()=>{
+    if(!active.current) return;
+    if(looted.current.filter(Boolean).length >= MAX_LOOT) return;
+
+    const t = bestIdx(vals.current, looted.current, burglar.current);
+    if(t === -1) return;
+
+    target.current = t;
+    bump();
+
+    clearTimeout(moveTimer.current);
+    moveTimer.current = setTimeout(()=>{
+      if(!active.current) return;
+      /* burglar arrives */
+      if(lockedOn.current !== t && !looted.current[t]){
+        looted.current[t] = true;
+        const amt = vals.current[t];
+        setStolen(s=>s+amt);
+        setNotif({type:'loss',idx:t,amount:amt,key:Date.now()});
+      }
+      burglar.current = t;
+      target.current  = null;
+      bump();
+      /* short pause then next move */
+      setTimeout(scheduleMove, 350);
+    }, MOVE_MS);
+  },[]);
+
+  /* ── respawn after catch ── */
+  const doRespawn = useCallback(()=>{
+    vals.current   = pick9();
+    const avail    = looted.current.map((l,i)=>!l?i:null).filter(x=>x!==null);
+    burglar.current= avail[Math.floor(Math.random()*avail.length)]??0;
+    target.current = null;
+    bump();
+    setTimeout(scheduleMove, 500);
+  },[scheduleMove]);
+
+  /* ── kick off on mount ── */
+  useEffect(()=>{
+    active.current=true;
+    scheduleMove();
+    return()=>{
+      active.current=false;
+      clearTimeout(moveTimer.current);
+      clearTimeout(lockTimer.current);
+    };
+  },[]);
+
+  /* ── lock-on: start ── */
+  const startLock = useCallback((idx)=>{
+    if(!active.current) return;
+    if(looted.current[idx]) return;
+    if(target.current === null) return;   // burglar not moving yet
+
+    lockedOn.current = idx;
+    const start = Date.now();
+    setLockState({idx,start});
+
+    clearTimeout(lockTimer.current);
+    lockTimer.current = setTimeout(()=>{
+      if(!active.current) return;
+      if(lockedOn.current === target.current){
+        /* ✓ CATCH */
+        clearTimeout(moveTimer.current);
+        setScore(s=>s+1);
+        setNotif({type:'catch',idx,key:Date.now()});
+        lockedOn.current = null;
+        setLockState({idx:null,start:null});
+        doRespawn();
+      }
+    }, LOCK_MS);
+  },[doRespawn]);
+
+  /* ── lock-on: cancel ── */
+  const cancelLock = useCallback(()=>{
+    lockedOn.current = null;
+    setLockState({idx:null,start:null});
+    clearTimeout(lockTimer.current);
+  },[]);
+
+  return{
+    vals:     vals.current,
+    looted:   looted.current,
+    target:   target.current,
+    lootCount,isDead,
+    stolen, score,
+    lockState, notif,
+    startLock, cancelLock,
+  };
+}
+
+/* ════════════════════════════════════════════════════════
+   ApartmentWindow
+   Desktop : mouseenter = reveal, mousedown/up = lock
+   Mobile  : tap = reveal toggle, touchstart hold 1s = lock
+   ════════════════════════════════════════════════════════ */
+function ApartmentWindow({idx,value,looted,isLockedOn,lockStart,notif,startLock,cancelLock}){
+  const [revealed,setRevealed] = useState(false);  // mobile tap-reveal
+  const [hovered,setHovered]   = useState(false);  // desktop hover
+  const [prog,setProg]         = useState(0);
+  const touchTimer = useRef(null);
+  const touchMoved = useRef(false);
+  const touch      = isTouch();
+
+  /* progress bar animation */
+  useEffect(()=>{
+    if(!isLockedOn||!lockStart){setProg(0);return;}
+    const start=lockStart;
+    const id=setInterval(()=>{
+      const p=Math.min(100,((Date.now()-start)/LOCK_MS)*100);
+      setProg(p);
+      if(p>=100)clearInterval(id);
+    },30);
+    return()=>clearInterval(id);
+  },[isLockedOn,lockStart]);
+
+  useEffect(()=>{if(looted){setRevealed(false);setHovered(false);}}, [looted]);
+
+  /* ── visual state ── */
+  const showValue = looted ? false : (touch ? revealed : hovered);
+  const borderCol = looted ? '#7f1d1d' : isLockedOn ? '#60a5fa' : '#152840';
+  const bgCol     = looted ? '#120404' : '#09131d';
+  const glowStyle = isLockedOn
+    ? '0 0 20px 4px rgba(96,165,250,.4),inset 0 0 28px rgba(0,0,0,.8)'
+    : 'inset 0 0 28px rgba(0,0,0,.85)';
+
+  /* ── desktop handlers ── */
+  const onEnter = ()=>{ if(!touch&&!looted) setHovered(true); };
+  const onLeave = ()=>{ if(!touch) { setHovered(false); cancelLock(); } };
+  const onMDown = (e)=>{ if(touch||looted) return; e.preventDefault(); startLock(idx); };
+  const onMUp   = ()=>{ if(!touch) cancelLock(); };
+
+  /* ── mobile handlers ── */
+  const onTStart = (e)=>{
+    if(!touch||looted) return;
+    touchMoved.current=false;
+    /* after 1 s without moving → lock-on */
+    touchTimer.current=setTimeout(()=>{
+      if(!touchMoved.current){
+        startLock(idx);
+      }
+    }, LOCK_MS);
+  };
+  const onTMove = ()=>{ touchMoved.current=true; clearTimeout(touchTimer.current); cancelLock(); };
+  const onTEnd  = (e)=>{
+    clearTimeout(touchTimer.current);
+    if(!touchMoved.current){
+      /* short tap → toggle reveal */
+      setRevealed(r=>!r);
+    }
+    cancelLock();
+  };
+
+  const isLoss  = notif?.type==='loss'  && notif.idx===idx;
+  const isCatch = notif?.type==='catch' && notif.idx===idx;
+
+  return(
+    <div
+      style={{position:'relative',userSelect:'none',WebkitUserSelect:'none',
+        cursor:looted?'default':touch?'pointer':'crosshair'}}
+      onMouseEnter={onEnter} onMouseLeave={onLeave}
+      onMouseDown={onMDown}  onMouseUp={onMUp}
+      onTouchStart={onTStart} onTouchMove={onTMove} onTouchEnd={onTEnd}
+    >
+      {/* window pane */}
+      <div style={{
+        width:'100%',paddingBottom:'90%',position:'relative',
+        background:bgCol,
+        border:`1.5px solid ${borderCol}`,
+        borderRadius:4,
+        boxShadow:glowStyle,
+        transition:'background .15s,border-color .2s,box-shadow .2s',
+        overflow:'hidden',
+      }}>
+        <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',
+          alignItems:'center',justifyContent:'center'}}>
+          {!looted&&(
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'clamp(3px,1vw,5px)',
+              padding:'clamp(6px,2vw,10px)',width:'100%'}}>
+              {[0,1,2,3].map(p=>(
+                <div key={p} style={{
+                  background:'rgba(10,30,58,.7)',
+                  borderRadius:2,
+                  height:'clamp(10px,2.5vw,18px)',
+                  border:'.5px solid rgba(22,64,120,.35)',
+                }}/>
+              ))}
+            </div>
+          )}
+          {looted&&(
+            <div style={{textAlign:'center'}}>
+              <div style={{color:'#ef4444',fontSize:'var(--fs-tiny)',letterSpacing:3,
+                fontFamily:'Orbitron,monospace',marginBottom:3}}>LOOTED</div>
+              <div style={{color:'#7f1d1d',fontSize:'clamp(14px,4vw,22px)'}}>✕</div>
+            </div>
+          )}
+          {/* lock progress bar */}
+          {isLockedOn&&(
+            <div style={{position:'absolute',bottom:0,left:0,right:0,height:3,
+              background:'rgba(30,60,120,.4)'}}>
+              <div style={{height:'100%',width:`${prog}%`,background:'#60a5fa',
+                boxShadow:'0 0 8px #60a5fa'}}/>
+            </div>
+          )}
+          {/* mobile tap hint ring when not yet revealed */}
+          {touch&&!looted&&!revealed&&(
+            <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',
+              justifyContent:'center',pointerEvents:'none'}}>
+              <div style={{width:'clamp(16px,4vw,22px)',height:'clamp(16px,4vw,22px)',
+                borderRadius:'50%',border:'1px solid rgba(96,165,250,.25)'}}/>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* value tooltip */}
+      {showValue&&(
+        <div style={{
+          position:'absolute',
+          bottom:'calc(100% + 7px)',
+          left:'50%',transform:'translateX(-50%)',
+          background:'rgba(2,6,14,.97)',
+          border:'1px solid #ca8a04',
+          borderRadius:4,
+          padding:'3px 9px',
+          whiteSpace:'nowrap',
+          color:'#fde047',
+          fontSize:'var(--fs-sm)',
+          fontFamily:'Orbitron,monospace',
+          letterSpacing:1,
+          boxShadow:'0 0 14px rgba(202,138,4,.35)',
+          zIndex:80,
+          pointerEvents:'none',
+        }}>
+          {fmt(value)}
+          <div style={{position:'absolute',top:'100%',left:'50%',transform:'translateX(-50%)',
+            borderLeft:'5px solid transparent',borderRight:'5px solid transparent',
+            borderTop:'5px solid #ca8a04',width:0,height:0}}/>
+        </div>
+      )}
+
+      {/* LOSS */}
+      {isLoss&&(
+        <div key={notif.key} className="loss-notif" style={{
+          position:'absolute',top:-36,left:'50%',
+          background:'rgba(90,8,8,.97)',border:'1px solid #dc2626',
+          borderRadius:4,padding:'3px 8px',whiteSpace:'nowrap',
+          color:'#fca5a5',fontSize:'var(--fs-tiny)',
+          fontFamily:'Orbitron,monospace',letterSpacing:1,
+          boxShadow:'0 0 14px rgba(220,38,38,.5)',zIndex:90,pointerEvents:'none',
+        }}>LOSS −{fmt(notif.amount)}</div>
+      )}
+
+      {/* CATCH */}
+      {isCatch&&(
+        <div key={notif.key} className="catch-notif" style={{
+          position:'absolute',top:-36,left:'50%',
+          background:'rgba(4,54,18,.97)',border:'1px solid #22c55e',
+          borderRadius:4,padding:'3px 8px',whiteSpace:'nowrap',
+          color:'#86efac',fontSize:'var(--fs-tiny)',
+          fontFamily:'Orbitron,monospace',letterSpacing:1,
+          boxShadow:'0 0 14px rgba(34,197,94,.5)',zIndex:90,pointerEvents:'none',
+        }}>CAUGHT!</div>
+      )}
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════  HUD  */
+function HUD({stolen,score,lootCount,moving}){
+  return(
+    <div style={{width:'100%',marginBottom:'clamp(8px,2vw,12px)'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
+        marginBottom:'clamp(6px,1.5vw,10px)'}}>
+        {/* title */}
+        <div style={{display:'flex',alignItems:'baseline',gap:5}}>
+          <span style={{fontFamily:'Orbitron,monospace',fontSize:'var(--fs-md)',fontWeight:900,
+            color:'#f59e0b',letterSpacing:3}}>SHADOW</span>
+          <span style={{fontFamily:'Orbitron,monospace',fontSize:'var(--fs-md)',fontWeight:900,
+            color:'#cbd5e1',letterSpacing:3}}>WATCH</span>
+        </div>
+        {/* counters */}
+        <div style={{display:'flex',gap:'clamp(5px,1.5vw,8px)'}}>
+          {[{l:'CAUGHT',v:score,c:'#4ade80'},{l:'LOOTED',v:`${lootCount}/3`,c:'#f87171'}].map(({l,v,c})=>(
+            <div key={l} style={{background:'rgba(8,16,28,.92)',border:'1px solid #1a3352',
+              borderRadius:4,padding:'3px clamp(8px,2vw,12px)',textAlign:'center',minWidth:52}}>
+              <div style={{color:'#475569',fontSize:'var(--fs-tiny)',letterSpacing:2,
+                fontFamily:'Share Tech Mono'}}>{l}</div>
+              <div style={{color:c,fontSize:'var(--fs-lg)',fontFamily:'Orbitron,monospace',
+                fontWeight:700,lineHeight:1.2}}>{v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* stat bar */}
+      <div style={{display:'flex',gap:'clamp(5px,1.5vw,8px)'}}>
+        <div style={{flex:1,background:'rgba(8,16,28,.92)',border:'1px solid #1a3352',
+          borderRadius:4,padding:'5px clamp(8px,2vw,12px)',
+          display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <span style={{color:'#475569',fontSize:'var(--fs-tiny)',letterSpacing:2,
+            fontFamily:'Share Tech Mono'}}>STOLEN</span>
+          <span style={{color:'#f87171',fontSize:'var(--fs-sm)',fontFamily:'Orbitron,monospace',
+            fontWeight:700}}>{fmt(stolen)}</span>
+        </div>
+        <div style={{flex:1,background:'rgba(8,16,28,.92)',border:'1px solid #1a3352',
+          borderRadius:4,padding:'5px clamp(8px,2vw,12px)',
+          display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <span style={{color:'#475569',fontSize:'var(--fs-tiny)',letterSpacing:2,
+            fontFamily:'Share Tech Mono'}}>BURGLAR</span>
+          <span style={{color:moving?'#fbbf24':'#334155',fontSize:'var(--fs-tiny)',
+            fontFamily:'Share Tech Mono',letterSpacing:1}}>
+            {moving?'▶ MOVING':'◼ STILL'}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════
+   GameSession — isolated component so its useGameLogic
+   instance is truly destroyed & recreated on each restart.
+   ════════════════════════════════════════════════════════ */
+function GameSession({onGameOver}){
+  const g = useGameLogic();
+  const touch = isTouch();
+
+  useEffect(()=>{
+    if(g.isDead) onGameOver(g.stolen, g.score);
+  },[g.isDead]);
+
+  return(
+    <div style={{
+      width:'100%',height:'100dvh',background:'#060a0f',
+      display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+      padding:'clamp(10px,3vw,16px) clamp(10px,3vw,16px)',
+      position:'relative',
+    }}>
+      <div className="scanlines"/>
+      <div style={{position:'absolute',top:0,left:0,right:0,height:2,
+        background:'linear-gradient(90deg,transparent 5%,#b45309 30%,#f59e0b 50%,#b45309 70%,transparent 95%)',
+        boxShadow:'0 0 16px rgba(245,158,11,.5)'}}/>
+
+      <div style={{width:'100%',maxWidth:'min(480px,96vw)'}}>
+        <HUD stolen={g.stolen} score={g.score} lootCount={g.lootCount} moving={g.target!==null}/>
+        {/* grid frame */}
+        <div style={{background:'rgba(3,7,14,.99)',border:'2px solid #0c1c30',borderRadius:6,
+          padding:'clamp(5px,1.5vw,8px)',
+          boxShadow:'0 0 60px rgba(0,0,0,.9),inset 0 0 70px rgba(0,0,0,.6)'}}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'var(--gap)'}}>
+            {g.vals.map((val,idx)=>(
+              <ApartmentWindow key={idx} idx={idx} value={val}
+                looted={g.looted[idx]}
+                isLockedOn={g.lockState.idx===idx}
+                lockStart={g.lockState.start}
+                notif={g.notif}
+                startLock={g.startLock}
+                cancelLock={g.cancelLock}
+              />
+            ))}
+          </div>
+        </div>
+        <div style={{display:'flex',justifyContent:'space-between',marginTop:7,padding:'0 2px'}}>
+          <span style={{color:'#0f2336',fontSize:'var(--fs-tiny)',fontFamily:'Share Tech Mono',
+            letterSpacing:2}}>SECTOR 7 · BLOCK C</span>
+          <span style={{color:'#0f2336',fontSize:'var(--fs-tiny)',fontFamily:'Share Tech Mono',
+            letterSpacing:2}}>{touch?'TAP=SCOUT · HOLD=LOCK':'HOVER=SCOUT · HOLD=LOCK'}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════  Screens  */
+function StartScreen({onStart}){
+  const [hov,setHov]=useState(false);
+  const touch=isTouch();
+  const steps=touch
+    ?[['01','TAP WINDOWS','Reveal loot values'],['02','PREDICT','Find the highest'],['03','HOLD 1 SEC','Lock on & catch']]
+    :[['01','HOVER WINDOWS','Scout loot values'],['02','PREDICT','Find the highest'],['03','CLICK & HOLD','Lock on for 1 sec']];
+  return(
+    <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+      height:'100dvh',width:'100%',background:'#060a0f',padding:'clamp(16px,5vw,32px)',
+      position:'relative',overflow:'hidden'}}>
+      <div className="scanlines"/>
+      <div style={{position:'absolute',inset:0,
+        background:'radial-gradient(ellipse at 50% 35%,rgba(20,40,100,.16) 0%,transparent 65%)',
+        pointerEvents:'none'}}/>
+      <div style={{textAlign:'center',position:'relative',zIndex:10,width:'100%',maxWidth:420}}>
+        <div style={{fontSize:'var(--fs-tiny)',letterSpacing:6,color:'#2a3a50',
+          fontFamily:'Share Tech Mono',marginBottom:'clamp(12px,3vw,20px)'}}>
+          CLASSIFIED · LEVEL 5 · OPERATION
+        </div>
+        <h1 className="glitch-title" style={{fontFamily:'Orbitron,monospace',fontSize:'var(--fs-xl)',
+          fontWeight:900,color:'#f59e0b',lineHeight:.92,letterSpacing:4,
+          textShadow:'0 0 50px rgba(245,158,11,.4)'}}>SHADOW</h1>
+        <h1 style={{fontFamily:'Orbitron,monospace',fontSize:'var(--fs-xl)',fontWeight:900,
+          color:'#e2e8f0',lineHeight:.92,letterSpacing:4,marginBottom:'clamp(16px,4vw,26px)',
+          textShadow:'0 0 18px rgba(200,220,255,.12)'}}>WATCH</h1>
+        <div style={{height:1,background:'linear-gradient(90deg,transparent,#f59e0b 40%,#f59e0b 60%,transparent)',
+          margin:'0 auto clamp(14px,3.5vw,22px)',width:'70%'}}/>
+        <p style={{color:'#4a5e72',fontSize:'var(--fs-sm)',letterSpacing:2,lineHeight:2.1,
+          marginBottom:'clamp(20px,5vw,34px)',fontFamily:'Share Tech Mono'}}>
+          Assess the values.&nbsp; Predict the target.&nbsp; Catch the burglar.
+        </p>
+        <div style={{display:'flex',gap:'clamp(5px,1.5vw,8px)',justifyContent:'center',
+          marginBottom:'clamp(24px,6vw,38px)'}}>
+          {steps.map(([n,t,s])=>(
+            <div key={n} style={{background:'rgba(8,16,28,.85)',border:'1px solid #192d45',
+              borderRadius:4,padding:'clamp(8px,2vw,11px) clamp(8px,2vw,11px)',
+              textAlign:'center',flex:1}}>
+              <div style={{color:'#f59e0b',fontSize:'var(--fs-sm)',fontFamily:'Orbitron,monospace',
+                fontWeight:700,marginBottom:4}}>{n}</div>
+              <div style={{color:'#7a92a8',fontSize:'var(--fs-tiny)',letterSpacing:1,
+                fontFamily:'Share Tech Mono',marginBottom:2}}>{t}</div>
+              <div style={{color:'#2a3a50',fontSize:'var(--fs-tiny)',fontFamily:'Share Tech Mono'}}>{s}</div>
+            </div>
+          ))}
+        </div>
+        <button
+          onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+          onClick={onStart}
+          style={{fontFamily:'Orbitron,monospace',fontSize:'var(--fs-sm)',fontWeight:700,
+            letterSpacing:4,color:hov?'#060a0f':'#f59e0b',
+            background:hov?'#f59e0b':'transparent',border:'2px solid #f59e0b',
+            borderRadius:3,padding:'clamp(11px,3vw,15px) clamp(28px,8vw,44px)',
+            cursor:'pointer',transition:'all .18s',width:'100%',maxWidth:280,
+            boxShadow:hov?'0 0 32px rgba(245,158,11,.7)':'0 0 12px rgba(245,158,11,.18)'}}>
+          START MISSION
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CountdownScreen({onDone}){
+  const [n,setN]=useState(3);
+  const [ck,setCk]=useState(0);
+  useEffect(()=>{
+    if(n===0){const t=setTimeout(onDone,900);return()=>clearTimeout(t);}
+    const t=setTimeout(()=>{setN(c=>c-1);setCk(k=>k+1);},1000);
+    return()=>clearTimeout(t);
+  },[n,onDone]);
+  return(
+    <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+      height:'100dvh',width:'100%',background:'#060a0f',position:'relative'}}>
+      <div className="scanlines"/>
+      <div style={{textAlign:'center',zIndex:10}}>
+        {n>0
+          ?<div key={ck} className="countdown-pop" style={{fontFamily:'Orbitron,monospace',
+              fontSize:'var(--fs-count)',fontWeight:900,color:'#f59e0b',lineHeight:1,
+              textShadow:'0 0 80px rgba(245,158,11,.6)',letterSpacing:-4}}>{n}</div>
+          :<div style={{fontFamily:'Orbitron,monospace',fontSize:'clamp(14px,4vw,22px)',
+              fontWeight:700,color:'#22c55e',letterSpacing:4,padding:'0 20px',
+              textShadow:'0 0 28px rgba(34,197,94,.5)'}}>SECURE THE PERIMETER</div>
+        }
+        <div style={{color:'#2a3a50',fontSize:'var(--fs-tiny)',letterSpacing:4,marginTop:20,
+          fontFamily:'Share Tech Mono'}}>
+          {n>0?'MISSION COMMENCING IN...':'DEPLOYING UNITS...'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GameOverScreen({stolen,score,onRestart}){
+  const [hov,setHov]=useState(false);
+  return(
+    <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+      height:'100dvh',width:'100%',background:'#060a0f',position:'relative'}}>
+      <div className="scanlines"/>
+      <div style={{textAlign:'center',zIndex:10,padding:'clamp(16px,5vw,28px)',width:'100%',maxWidth:420}}>
+        <div style={{fontSize:'var(--fs-tiny)',letterSpacing:6,color:'#ef4444',
+          fontFamily:'Share Tech Mono',marginBottom:'clamp(10px,3vw,16px)'}}>
+          MISSION COMPROMISED
+        </div>
+        <h2 style={{fontFamily:'Orbitron,monospace',fontSize:'clamp(28px,10vw,50px)',fontWeight:900,
+          color:'#ef4444',letterSpacing:3,textShadow:'0 0 50px rgba(239,68,68,.5)',
+          marginBottom:'clamp(20px,5vw,32px)'}}>GAME OVER</h2>
+        <div style={{display:'flex',gap:'clamp(10px,3vw,20px)',justifyContent:'center',
+          marginBottom:'clamp(24px,6vw,38px)'}}>
+          {[{l:'TOTAL STOLEN',v:fmt(stolen),c:'#f87171'},{l:'BURGLARS CAUGHT',v:score,c:'#4ade80'}].map(({l,v,c})=>(
+            <div key={l} style={{background:'rgba(8,16,28,.96)',border:'1px solid #1a3352',
+              borderRadius:6,padding:'clamp(14px,4vw,22px) clamp(16px,4vw,28px)',textAlign:'center',flex:1}}>
+              <div style={{color:'#475569',fontSize:'var(--fs-tiny)',letterSpacing:2,
+                marginBottom:8,fontFamily:'Share Tech Mono'}}>{l}</div>
+              <div style={{color:c,fontSize:'clamp(18px,5vw,26px)',fontFamily:'Orbitron,monospace',
+                fontWeight:700}}>{v}</div>
+            </div>
+          ))}
+        </div>
+        <button onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+          onClick={onRestart}
+          style={{fontFamily:'Orbitron,monospace',fontSize:'var(--fs-sm)',fontWeight:700,
+            letterSpacing:4,color:hov?'#060a0f':'#f59e0b',
+            background:hov?'#f59e0b':'transparent',border:'2px solid #f59e0b',
+            borderRadius:3,padding:'clamp(11px,3vw,14px) clamp(28px,8vw,40px)',
+            cursor:'pointer',transition:'all .18s',width:'100%',maxWidth:280,
+            boxShadow:hov?'0 0 28px rgba(245,158,11,.65)':'0 0 10px rgba(245,158,11,.14)'}}>
+          NEW MISSION
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════
+   Root — manages phase & passes final stats to game-over.
+   GameSession unmounts completely on restart (via key),
+   so useGameLogic refs are fully reset.
+   ════════════════════════════════════════════════════════ */
+function App(){
+  const [phase,setPhase]       = useState('start');
+  const [gameKey,setGameKey]   = useState(0);
+  const [finalStats,setFinals] = useState({stolen:0,score:0});
+
+  const handleStart   = ()=>setPhase('countdown');
+  const handleCdDone  = useCallback(()=>setPhase('game'),[]);
+  const handleGameOver= useCallback((stolen,score)=>{
+    setFinals({stolen,score});
+    setPhase('over');
+  },[]);
+  const handleRestart = ()=>{
+    setGameKey(k=>k+1);   // unmount old GameSession → fresh refs
+    setFinals({stolen:0,score:0});
+    setPhase('countdown');
+  };
+
+  if(phase==='start')    return <StartScreen onStart={handleStart}/>;
+  if(phase==='countdown')return <CountdownScreen key={`cd-${gameKey}`} onDone={handleCdDone}/>;
+  if(phase==='over')     return <GameOverScreen stolen={finalStats.stolen} score={finalStats.score} onRestart={handleRestart}/>;
+  /* phase==='game' */
+  return <GameSession key={`gs-${gameKey}`} onGameOver={handleGameOver}/>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
