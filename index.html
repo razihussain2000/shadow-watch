@@ -218,8 +218,8 @@ function ApartmentWindow({idx,value,looted,isLockedOn,lockStart,notif,startLock,
   const [revealed,setRevealed] = useState(false);  // mobile tap-reveal
   const [hovered,setHovered]   = useState(false);  // desktop hover
   const [prog,setProg]         = useState(0);
-  const touchTimer = useRef(null);
-  const touchMoved = useRef(false);
+  const touchMoved      = useRef(false);
+  const touchLockFired  = useRef(false);
   const touch      = isTouch();
 
   /* progress bar animation */
@@ -252,24 +252,33 @@ function ApartmentWindow({idx,value,looted,isLockedOn,lockStart,notif,startLock,
 
   /* ── mobile handlers ── */
   const onTStart = (e)=>{
-    if(!touch||looted) return;
-    touchMoved.current=false;
-    /* after 1 s without moving → lock-on */
-    touchTimer.current=setTimeout(()=>{
-      if(!touchMoved.current){
-        startLock(idx);
-      }
+  if(!touch||looted) return;
+  e.preventDefault();
+  touchMoved.current     = false;
+  touchLockFired.current = false;
+  const wrappedStart = (i)=>{
+    startLock(i);
+    setTimeout(()=>{
+      if(!touchMoved.current) touchLockFired.current = true;
     }, LOCK_MS);
   };
-  const onTMove = ()=>{ touchMoved.current=true; clearTimeout(touchTimer.current); cancelLock(); };
-  const onTEnd  = (e)=>{
-    clearTimeout(touchTimer.current);
-    if(!touchMoved.current){
-      /* short tap → toggle reveal */
-      setRevealed(r=>!r);
-    }
+  wrappedStart(idx);
+};
+const onTMove = (e)=>{
+  if(!touchMoved.current){
+    touchMoved.current = true;
     cancelLock();
-  };
+  }
+};
+const onTEnd = (e)=>{
+  if(touchMoved.current) return;
+  if(touchLockFired.current){
+    touchLockFired.current = false;
+    return;
+  }
+  cancelLock();
+  setRevealed(r=>!r);
+};
 
   const isLoss  = notif?.type==='loss'  && notif.idx===idx;
   const isCatch = notif?.type==='catch' && notif.idx===idx;
@@ -281,6 +290,7 @@ function ApartmentWindow({idx,value,looted,isLockedOn,lockStart,notif,startLock,
       onMouseEnter={onEnter} onMouseLeave={onLeave}
       onMouseDown={onMDown}  onMouseUp={onMUp}
       onTouchStart={onTStart} onTouchMove={onTMove} onTouchEnd={onTEnd}
+      onContextMenu={e=>e.preventDefault()}
     >
       {/* window pane */}
       <div style={{
@@ -466,7 +476,7 @@ function GameSession({onGameOver, onWin}){ // <-- Accept onWin here
         <div style={{background:'rgba(3,7,14,.99)',border:'2px solid #0c1c30',borderRadius:6,
           padding:'clamp(5px,1.5vw,8px)',
           boxShadow:'0 0 60px rgba(0,0,0,.9),inset 0 0 70px rgba(0,0,0,.6)'}}>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'var(--gap)'}}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'var(--gap)',touchAction:'none'}}>
             {g.vals.map((val,idx)=>(
               <ApartmentWindow key={idx} idx={idx} value={val}
                 looted={g.looted[idx]}
