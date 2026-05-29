@@ -176,7 +176,7 @@ function useGameLogic(onWin){ // <-- Accept onWin here
         
         // Play the celebratory win sound
         try {
-          const sfx = new Audio('https://github.com/razihussain2000/shadow-watch/blob/main/winsound.mp3');
+          const sfx = new Audio('https://raw.githubusercontent.com/razihussain2000/shadow-watch/main/winsound.mp3');
           sfx.volume = 0.6;
           sfx.play();
         } catch(e) { console.log("SFX playback blocked"); }
@@ -814,9 +814,14 @@ function App(){
   const handleCdDone  = useCallback(()=>setPhase('game'),[]);
   
   const handleGameOver= useCallback((stolen,score)=>{
-    setFinals({stolen,score});
-    setPhase('over');
-  },[]);
+  try {
+    const sfx = new Audio('https://raw.githubusercontent.com/razihussain2000/shadow-watch/main/losesound.mp3');
+    sfx.volume = 0.6;
+    sfx.play();
+  } catch(e) { console.log("SFX playback blocked"); }
+  setFinals({stolen,score});
+  setPhase('over');
+},[]);
 
   const handleWin = useCallback((stolen)=>{
     setFinals({stolen, score: 1});
