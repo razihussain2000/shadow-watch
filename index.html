@@ -458,9 +458,12 @@ function GameSession({onGameOver, onWin}){ // <-- Accept onWin here
   const g = useGameLogic(onWin); // <-- Pass it down into the hook
   const touch = isTouch();
 
-  useEffect(()=>{
-    if(g.isDead) onGameOver(g.stolen, g.score);
-  },[g.isDead]);
+ useEffect(()=>{
+  if(g.isDead){
+    const t = setTimeout(()=>onGameOver(g.stolen, g.score), 2500);
+    return()=>clearTimeout(t);
+  }
+},[g.isDead]);
 
   return(
     <div style={{
