@@ -562,6 +562,110 @@ function StartScreen({onStart}){
   );
 }
 
+function TutorialScreen({onBegin}){
+  const [hov,setHov]=useState(false);
+  const touch=isTouch();
+  const steps=[
+    {
+      num:'01',
+      icon:'◎',
+      title: touch ? 'TAP TO SCOUT' : 'HOVER TO SCOUT',
+      desc: touch
+        ? 'Tap any apartment window to reveal its hidden loot value. Tap again to hide it. Scout as many as you need.'
+        : 'Move your mouse over any apartment window to reveal its hidden loot value. Scout all 9 before committing.',
+    },
+    {
+      num:'02',
+      icon:'◈',
+      title:'IDENTIFY THE TARGET',
+      desc:'The burglar always goes for the highest-value apartment next. Find the most expensive unlooted window — that\'s where they\'re heading.',
+    },
+    {
+      num:'03',
+      icon:'◉',
+      title: touch ? 'HOLD TO LOCK ON' : 'CLICK & HOLD TO LOCK ON',
+      desc: touch
+        ? 'The moment the burglar leaves a window, press and hold your predicted target for 1 full second. Hold until the blue bar fills — then you\'ve got them.'
+        : 'The moment the burglar leaves a window, click and hold your predicted target for 1 full second. Watch the blue bar fill — release too early and they escape.',
+    },
+  ];
+  return(
+    <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',
+      height:'100dvh',width:'100%',background:'#060a0f',padding:'clamp(16px,5vw,28px)',
+      position:'relative',overflow:'hidden'}}>
+      <div className="scanlines"/>
+      <div style={{position:'absolute',inset:0,
+        background:'radial-gradient(ellipse at 50% 30%,rgba(20,40,100,.14) 0%,transparent 65%)',
+        pointerEvents:'none'}}/>
+      <div style={{width:'100%',maxWidth:460,position:'relative',zIndex:10}}>
+        {/* header */}
+        <div style={{textAlign:'center',marginBottom:'clamp(20px,5vw,32px)'}}>
+          <div style={{fontSize:'var(--fs-tiny)',letterSpacing:6,color:'#2a3a50',
+            fontFamily:'Share Tech Mono',marginBottom:10}}>OPERATIVE BRIEFING</div>
+          <div style={{fontFamily:'Orbitron,monospace',fontSize:'var(--fs-md)',fontWeight:900,
+            color:'#f59e0b',letterSpacing:4,textShadow:'0 0 20px rgba(245,158,11,.3)'}}>
+            HOW TO PLAY
+          </div>
+          <div style={{width:120,height:1,
+            background:'linear-gradient(90deg,transparent,#f59e0b 40%,#f59e0b 60%,transparent)',
+            margin:'12px auto 0'}}/>
+        </div>
+
+        {/* steps */}
+        <div style={{display:'flex',flexDirection:'column',gap:'clamp(10px,2.5vw,14px)',
+          marginBottom:'clamp(22px,5vw,32px)'}}>
+          {steps.map(({num,icon,title,desc})=>(
+            <div key={num} style={{display:'flex',gap:'clamp(12px,3vw,18px)',alignItems:'flex-start',
+              background:'rgba(8,16,28,.85)',border:'1px solid #192d45',borderRadius:5,
+              padding:'clamp(12px,3vw,16px)'}}>
+              {/* step number + icon */}
+              <div style={{flexShrink:0,textAlign:'center',width:36}}>
+                <div style={{color:'#f59e0b',fontSize:'var(--fs-sm)',fontFamily:'Orbitron,monospace',
+                  fontWeight:700,lineHeight:1}}>{num}</div>
+                <div style={{color:'#1e3a5f',fontSize:'clamp(18px,5vw,26px)',lineHeight:1.2,
+                  marginTop:4}}>{icon}</div>
+              </div>
+              {/* text */}
+              <div style={{flex:1}}>
+                <div style={{color:'#94a3b8',fontSize:'var(--fs-sm)',fontFamily:'Orbitron,monospace',
+                  fontWeight:700,letterSpacing:2,marginBottom:6}}>{title}</div>
+                <div style={{color:'#4a5e72',fontSize:'var(--fs-tiny)',fontFamily:'Share Tech Mono',
+                  lineHeight:1.8,letterSpacing:.5}}>{desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* lose condition note */}
+        <div style={{background:'rgba(90,8,8,.35)',border:'1px solid #7f1d1d',borderRadius:4,
+          padding:'clamp(8px,2vw,11px) clamp(12px,3vw,16px)',
+          marginBottom:'clamp(20px,5vw,28px)',display:'flex',gap:12,alignItems:'center'}}>
+          <div style={{color:'#ef4444',fontSize:'clamp(14px,4vw,18px)',flexShrink:0}}>⚠</div>
+          <div style={{color:'#7a3030',fontSize:'var(--fs-tiny)',fontFamily:'Share Tech Mono',
+            lineHeight:1.7,letterSpacing:.5}}>
+            If the burglar successfully loots <span style={{color:'#f87171',fontWeight:700}}>3 apartments</span>, the mission is compromised. Game over.
+          </div>
+        </div>
+
+        {/* CTA */}
+        <div style={{textAlign:'center'}}>
+          <button
+            onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
+            onClick={onBegin}
+            style={{fontFamily:'Orbitron,monospace',fontSize:'var(--fs-sm)',fontWeight:700,
+              letterSpacing:4,color:hov?'#060a0f':'#f59e0b',
+              background:hov?'#f59e0b':'transparent',border:'2px solid #f59e0b',
+              borderRadius:3,padding:'clamp(11px,3vw,15px) clamp(28px,8vw,44px)',
+              cursor:'pointer',transition:'all .18s',width:'100%',maxWidth:280,
+              boxShadow:hov?'0 0 32px rgba(245,158,11,.7)':'0 0 12px rgba(245,158,11,.18)'}}>
+            BEGIN MISSION
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+  
 function CountdownScreen({onDone}){
   const [n,setN]=useState(3);
   const [ck,setCk]=useState(0);
@@ -712,7 +816,7 @@ function App(){
     if(audioRef.current) {
       audioRef.current.play().catch(e => console.log("Audio waiting for core window interaction"));
     }
-    setPhase('countdown');
+    setPhase('tutorial');
   };
 
   const handleCdDone  = useCallback(()=>setPhase('game'),[]);
@@ -734,6 +838,7 @@ function App(){
   };
 
   if(phase==='start')    return <StartScreen onStart={handleStart}/>;
+  if(phase==='tutorial') return <TutorialScreen onBegin={()=>setPhase('countdown')}/>;
   if(phase==='countdown')return <CountdownScreen key={`cd-${gameKey}`} onDone={handleCdDone}/>;
   if(phase==='over')     return <GameOverScreen stolen={finalStats.stolen} score={finalStats.score} onRestart={handleRestart}/>;
   if(phase==='win')      return <WinScreen stolen={finalStats.stolen} onRestart={handleRestart}/>;
