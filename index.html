@@ -460,7 +460,7 @@ function GameSession({onGameOver, onWin}){ // <-- Accept onWin here
 
  useEffect(()=>{
   if(g.isDead){
-    const t = setTimeout(()=>onGameOver(g.stolen, g.score), 2500);
+    const t = setTimeout(()=>onGameOver(g.stolen, g.score), 1500);
     return()=>clearTimeout(t);
   }
 },[g.isDead]);
